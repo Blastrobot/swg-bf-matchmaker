@@ -1,11 +1,70 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PROFESSION_STYLES, PROFESSION_LABEL } from "@/lib/professions";
 import { PROFESSIONS, type Profession } from "@/lib/types";
-import { ArrowRight, Plus, Trash2, X } from "lucide-react";
+import { ArrowRight, Plus, Trash2, X, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+
+// ── shared bits ──────────────────────────────────────────────────────────────
+function ProfessionToggle({
+    profession,
+    active,
+    onToggle,
+}: {
+    profession: Profession;
+    active: boolean;
+    onToggle: () => void;
+}) {
+    const s = PROFESSION_STYLES[profession];
+    return (
+        <button
+            type="button"
+            onClick={onToggle}
+            className={`label flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[10px] transition-all ${
+                active
+                    ? `${s.bg} ${s.border} ${s.text} ring-1 ${s.ring}`
+                    : "border-white/[0.08] bg-white/[0.02] text-stone-500 hover:border-white/20 hover:text-stone-300"
+            }`}
+        >
+            <span className={`size-1.5 rounded-full transition-colors ${active ? s.dot : "bg-stone-700"}`} />
+            {profession}
+        </button>
+    );
+}
+
+function ModalShell({
+    title,
+    eyebrow,
+    onClose,
+    children,
+    wide,
+}: {
+    title: string;
+    eyebrow: string;
+    onClose: () => void;
+    children: React.ReactNode;
+    wide?: boolean;
+}) {
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
+            <div
+                className={`brackets flex w-full ${wide ? "max-w-md" : "max-w-sm"} max-h-[90vh] flex-col gap-6 overflow-y-auto rounded-2xl border border-white/[0.1] bg-[var(--void-1)]/90 p-7 shadow-2xl shadow-black/60 backdrop-blur-2xl animate-rise`}
+            >
+                <div className="flex items-start justify-between">
+                    <div className="flex flex-col gap-1">
+                        <span className="label text-[10px] text-holo-300/80">{eyebrow}</span>
+                        <h2 className="font-display text-2xl uppercase tracking-wide text-[var(--ink)]">{title}</h2>
+                    </div>
+                    <button onClick={onClose} className="text-stone-500 transition-colors hover:text-holo-300">
+                        <X className="size-5" />
+                    </button>
+                </div>
+                {children}
+            </div>
+        </div>
+    );
+}
 
 export default function Lobby() {
     const router = useRouter();
@@ -115,189 +174,172 @@ export default function Lobby() {
         router.push(`/match/${matchId}`);
     };
 
+    const inputClass =
+        "w-full rounded-lg border border-white/[0.1] bg-black/40 px-3.5 py-2.5 text-sm text-[var(--ink)] placeholder:text-stone-600 outline-none transition-all focus:border-holo-400/60 focus:ring-1 focus:ring-holo-400/40";
+
     return (
         <>
             {/* ── main card ── */}
-            <section className="w-full max-w-sm rounded-2xl p-7 bg-black/50 backdrop-blur-2xl border border-white/[0.1] shadow-2xl text-stone-100 flex flex-col gap-7">
-
-                {/* create section */}
-                <div className="flex flex-col gap-3">
-                    <h2 className="text-[11px] font-bold tracking-[0.18em] uppercase text-stone-500">New lobby</h2>
-                    <Button
-                        className="w-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.1] text-stone-100 rounded-xl h-11 font-semibold tracking-wide transition-all"
-                        onClick={() => setCreateModalOpen(true)}
-                    >
-                        Create lobby
-                    </Button>
+            <section className="brackets flex w-full max-w-sm flex-col gap-7 rounded-2xl border border-white/[0.1] bg-[var(--void-1)]/80 p-7 shadow-2xl shadow-black/50 backdrop-blur-2xl animate-rise">
+                <div className="flex flex-col gap-1 border-b border-white/[0.07] pb-4">
+                    <span className="label text-[10px] text-holo-300/80">Access terminal</span>
+                    <h1 className="font-display text-3xl uppercase tracking-wide text-[var(--ink)]">Operations</h1>
                 </div>
 
-                <div className="h-px bg-white/[0.08]" />
+                {/* create section */}
+                <div className="flex flex-col gap-2.5">
+                    <h2 className="label text-[10px] text-stone-500">New lobby</h2>
+                    <button
+                        onClick={() => setCreateModalOpen(true)}
+                        className="group label flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-holo-400/30 bg-holo-400/[0.06] text-sm text-holo-100 transition-all hover:border-holo-400/60 hover:bg-holo-400/[0.12]"
+                    >
+                        <Plus className="size-4 text-holo-300 transition-transform group-hover:rotate-90" />
+                        Create lobby
+                    </button>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <div className="h-px flex-1 bg-white/[0.07]" />
+                    <span className="label text-[9px] text-stone-600">or</span>
+                    <div className="h-px flex-1 bg-white/[0.07]" />
+                </div>
 
                 {/* join section */}
-                <div className="flex flex-col gap-3">
-                    <h2 className="text-[11px] font-bold tracking-[0.18em] uppercase text-stone-500">Join existing</h2>
+                <div className="flex flex-col gap-2.5">
+                    <h2 className="label text-[10px] text-stone-500">Join existing</h2>
                     <div className="flex gap-2">
-                        <Input
-                            placeholder="Lobby code"
+                        <input
+                            placeholder="LOBBY CODE"
                             value={lobbyCode}
                             onChange={e => { setLobbyCode(e.target.value); setLobbyCodeError(""); }}
                             onKeyDown={e => e.key === "Enter" && handleValidateCode()}
-                            className="bg-white/[0.05] border-white/[0.1] text-stone-100 placeholder:text-stone-600 rounded-xl h-11 font-mono text-sm"
+                            className={`${inputClass} data h-12 tracking-[0.2em] uppercase placeholder:tracking-[0.2em]`}
                         />
-                        <Button
+                        <button
                             onClick={handleValidateCode}
-                            className="bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.1] text-stone-100 rounded-xl h-11 px-4 shrink-0"
+                            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-white/[0.1] bg-white/[0.04] text-stone-300 transition-all hover:border-holo-400/50 hover:text-holo-300"
                         >
                             <ArrowRight className="size-4" />
-                        </Button>
+                        </button>
                     </div>
                     {lobbyCodeError && (
-                        <p className="text-red-400 text-xs font-mono tracking-wide">{lobbyCodeError}</p>
+                        <p className="data text-xs tracking-wide text-red-400">{lobbyCodeError}</p>
                     )}
                 </div>
             </section>
 
             {/* ── create modal ── */}
             {createModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
-                    <div className="w-full max-w-md rounded-2xl bg-black/60 backdrop-blur-2xl border border-white/[0.1] shadow-2xl text-stone-100 flex flex-col gap-6 p-7 max-h-[90vh] overflow-y-auto">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-bold tracking-tight">Configure lobby</h2>
-                            <button onClick={() => setCreateModalOpen(false)} className="text-stone-400 hover:text-stone-100 transition-colors">
-                                <X className="size-5" />
-                            </button>
-                        </div>
-
-                        {/* admin info */}
-                        <div className="flex flex-col gap-2">
-                            <label className="text-xs font-semibold tracking-widest uppercase text-stone-400">Your name</label>
-                            <Input
-                                placeholder="Name"
-                                value={adminName}
-                                onChange={e => setAdminName(e.target.value)}
-                                className="bg-white/[0.05] border-white/[0.1] text-stone-100 placeholder:text-stone-600 rounded-xl"
-                            />
-                        </div>
-
-                        {/* admin professions */}
-                        <div className="flex flex-col gap-2">
-                            <label className="text-xs font-semibold tracking-widest uppercase text-stone-400">Your professions</label>
-                            <div className="flex flex-wrap gap-2">
-                                {PROFESSIONS.map(p => (
-                                    <button
-                                        key={p}
-                                        type="button"
-                                        onClick={() => toggleAdminProfession(p)}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider border transition-all ${
-                                            adminProfessions.includes(p)
-                                                ? "bg-white/[0.2] border-white/[0.4] text-white"
-                                                : "bg-white/[0.05] border-white/[0.1] text-stone-400 hover:border-white/[0.2] hover:text-stone-200"
-                                        }`}
-                                    >
-                                        {p}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* team names */}
-                        <div className="flex flex-col gap-2">
-                            <label className="text-xs font-semibold tracking-widest uppercase text-stone-400">Teams</label>
-                            <div className="flex flex-col gap-2">
-                                {teamNames.map((name, i) => (
-                                    <div key={i} className="flex gap-2 items-center">
-                                        <Input
-                                            placeholder={`Team ${i + 1} name`}
-                                            value={name}
-                                            onChange={e => updateTeamName(i, e.target.value)}
-                                            className="bg-white/[0.05] border-white/[0.1] text-stone-100 placeholder:text-stone-600 rounded-xl"
-                                        />
-                                        {teamNames.length > 2 && (
-                                            <button
-                                                type="button"
-                                                onClick={() => removeTeam(i)}
-                                                className="text-stone-500 hover:text-red-400 transition-colors"
-                                            >
-                                                <Trash2 className="size-4" />
-                                            </button>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                            {teamNames.length < 4 && (
-                                <button
-                                    type="button"
-                                    onClick={addTeam}
-                                    className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-stone-200 transition-colors mt-1 self-start"
-                                >
-                                    <Plus className="size-3.5" /> Add team
-                                </button>
-                            )}
-                        </div>
-
-                        {createError && <p className="text-red-400 text-sm">{createError}</p>}
-
-                        <Button
-                            onClick={handleCreateSubmit}
-                            disabled={createLoading}
-                            className="w-full bg-white/[0.15] hover:bg-white/[0.25] border border-white/[0.1] text-stone-100 rounded-xl h-11 font-semibold"
-                        >
-                            {createLoading ? "Creating…" : "Create lobby"}
-                        </Button>
+                <ModalShell eyebrow="Configure" title="New Lobby" wide onClose={() => setCreateModalOpen(false)}>
+                    {/* admin info */}
+                    <div className="flex flex-col gap-2">
+                        <label className="label text-[10px] text-stone-400">Username</label>
+                        <input
+                            placeholder="Trashcan"
+                            value={adminName}
+                            onChange={e => setAdminName(e.target.value)}
+                            className={inputClass}
+                        />
                     </div>
-                </div>
+
+                    {/* admin professions */}
+                    <div className="flex flex-col gap-2">
+                        <label className="label text-[10px] text-stone-400">Your professions</label>
+                        <div className="flex flex-wrap gap-1.5">
+                            {PROFESSIONS.map(p => (
+                                <ProfessionToggle
+                                    key={p}
+                                    profession={p}
+                                    active={adminProfessions.includes(p)}
+                                    onToggle={() => toggleAdminProfession(p)}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* team names */}
+                    <div className="flex flex-col gap-2">
+                        <label className="label text-[10px] text-stone-400">Factions</label>
+                        <div className="flex flex-col gap-2">
+                            {teamNames.map((name, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                    <span className="data w-6 shrink-0 text-center text-[10px] text-stone-600">{String(i + 1).padStart(2, "0")}</span>
+                                    <input
+                                        placeholder={`Team ${i + 1} name`}
+                                        value={name}
+                                        onChange={e => updateTeamName(i, e.target.value)}
+                                        className={inputClass}
+                                    />
+                                    {teamNames.length > 2 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => removeTeam(i)}
+                                            className="shrink-0 text-stone-600 transition-colors hover:text-red-400"
+                                        >
+                                            <Trash2 className="size-4" />
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        {teamNames.length < 4 && (
+                            <button
+                                type="button"
+                                onClick={addTeam}
+                                className="label mt-1 flex items-center gap-1.5 self-start text-[10px] text-stone-500 transition-colors hover:text-holo-300"
+                            >
+                                <Plus className="size-3.5" /> Add faction
+                            </button>
+                        )}
+                    </div>
+
+                    {createError && <p className="data text-xs text-red-400">{createError}</p>}
+
+                    <button
+                        onClick={handleCreateSubmit}
+                        disabled={createLoading}
+                        className="label flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-holo-400/40 bg-holo-400/[0.1] text-sm text-holo-100 transition-all hover:bg-holo-400/[0.18] disabled:opacity-40"
+                    >
+                        {createLoading ? "Deploying…" : <>Create lobby <ArrowRight className="size-4" /></>}
+                    </button>
+                </ModalShell>
             )}
 
             {/* ── join modal ── */}
             {joinModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
-                    <div className="w-full max-w-sm rounded-2xl bg-black/60 backdrop-blur-2xl border border-white/[0.1] shadow-2xl text-stone-100 flex flex-col gap-6 p-7">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-bold tracking-tight">Join lobby</h2>
-                            <button onClick={() => setJoinModalOpen(false)} className="text-stone-400 hover:text-stone-100 transition-colors">
-                                <X className="size-5" />
-                            </button>
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                            <label className="text-xs font-semibold tracking-widest uppercase text-stone-400">Your name</label>
-                            <Input
-                                placeholder="Name"
-                                value={joinName}
-                                onChange={e => setJoinName(e.target.value)}
-                                className="bg-white/5 border-white/10 text-stone-100 placeholder:text-stone-500 rounded-xl"
-                            />
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                            <label className="text-xs font-semibold tracking-widest uppercase text-stone-400">Your professions</label>
-                            <div className="flex flex-wrap gap-2">
-                                {PROFESSIONS.map(p => (
-                                    <button
-                                        key={p}
-                                        type="button"
-                                        onClick={() => toggleJoinProfession(p)}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider border transition-all ${
-                                            joinProfessions.includes(p)
-                                                ? "bg-white/20 border-white/40 text-white"
-                                                : "bg-white/5 border-white/10 text-stone-400 hover:border-white/20 hover:text-stone-200"
-                                        }`}
-                                    >
-                                        {p}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        <Button
-                            onClick={handleJoinSubmit}
-                            disabled={joinLoading || !joinName.trim() || joinProfessions.length === 0}
-                            className="w-full bg-white/15 hover:bg-white/25 border border-white/10 text-stone-100 rounded-xl h-11 font-semibold disabled:opacity-40"
-                        >
-                            {joinLoading ? "Joining…" : "Join"}
-                        </Button>
+                <ModalShell eyebrow="Enlist" title="Join Lobby" onClose={() => setJoinModalOpen(false)}>
+                    <div className="flex flex-col gap-2">
+                        <label className="label text-[10px] text-stone-400">Username</label>
+                        <input
+                            placeholder="Sandbag"
+                            value={joinName}
+                            onChange={e => setJoinName(e.target.value)}
+                            className={inputClass}
+                        />
                     </div>
-                </div>
+
+                    <div className="flex flex-col gap-2">
+                        <label className="label text-[10px] text-stone-400">Your professions</label>
+                        <div className="flex flex-wrap gap-1.5">
+                            {PROFESSIONS.map(p => (
+                                <ProfessionToggle
+                                    key={p}
+                                    profession={p}
+                                    active={joinProfessions.includes(p)}
+                                    onToggle={() => toggleJoinProfession(p)}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={handleJoinSubmit}
+                        disabled={joinLoading || !joinName.trim() || joinProfessions.length === 0}
+                        className="label flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-holo-400/40 bg-holo-400/[0.1] text-sm text-holo-100 transition-all hover:bg-holo-400/[0.18] disabled:opacity-40"
+                    >
+                        {joinLoading ? "Joining…" : <>Join <Check className="size-4" /></>}
+                    </button>
+                </ModalShell>
             )}
         </>
     );
