@@ -1,11 +1,12 @@
 "use client";
 
+import { dropOrSwap } from "@formkit/drag-and-drop";
 import { useDragAndDrop } from "@formkit/drag-and-drop/react";
 import type { Lobby, Player, Profession, Team } from "@/lib/types";
 import { PROFESSIONS } from "@/lib/types";
 import { Copy, Check, Shield, Pencil, X, Settings, Plus } from "lucide-react";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, createContext, useContext } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const PROFESSION_STYLES: Record<Profession, { bg: string; text: string; border: string }> = {
     medic:    { bg: "bg-emerald-950/60",  text: "text-emerald-400",  border: "border-emerald-800/50" },
@@ -24,14 +25,195 @@ const STATUS_STYLES: Record<string, { label: string; color: string }> = {
 };
 
 // ── Drag context ────────────────────────────────────────────────────────────
-type DragSource =
-    | { kind: "queue"; player: Player }
-    | { kind: "slot"; player: Player; teamId: string; slotIndex: number };
+type PlayerDragItem = {
+    kind: "player";
+    __key: string;
+    player: Player;
+};
 
-const DragCtx = createContext<{
-    dragging: DragSource | null;
-    setDragging: (d: DragSource | null) => void;
-}>({ dragging: null, setDragging: () => {} });
+type SlotDragItem = {
+    kind: "slot";
+    __key: string;
+    teamId: string;
+    slotIndex: number;
+    profession: Profession;
+    player: Player | null;
+};
+
+type BoardItem = PlayerDragItem | SlotDragItem;
+type BoardSnapshot = Record<string, BoardItem[]>;
+
+const QUEUE_COLUMN_ID = "queue";
+const DND_GROUP = "match-players";
+
+const teamColumnId = (teamId: string) => `team:${teamId}`;
+
+const isPlayer = (player: Player | null | undefined): player is Player => Boolean(player);
+
+const getBoardItemPlayer = (item: BoardItem): Player | null =>
+    item.kind === "player" ? item.player : item.player;
+
+const createPlayerItem = (player: Player): PlayerDragItem => ({
+    kind: "player",
+    __key: `player:${player.id}`,
+    player,
+});
+
+const createSlotItem = (teamId: string, slotIndex: number, profession: Profession, player: Player | null): SlotDragItem => ({
+    kind: "slot",
+    __key: `slot:${teamId}:${slotIndex}`,
+    teamId,
+    slotIndex,
+    profession,
+    player,
+});
+
+const getTeamPlayers = (team: Team): Player[] => team.players.filter(isPlayer);
+
+const boardItemSignature = (items: BoardItem[]) =>
+    items.map(item => {
+        const player = getBoardItemPlayer(item);
+        const playerKey = player ? `${player.id}:${player.name}:${player.professions.join(",")}` : "empty";
+        return item.kind === "slot"
+            ? `${item.__key}:${item.profession}:${playerKey}`
+            : `${item.__key}:${playerKey}`;
+    }).join("|");
+
+const createTeamBoardItems = (team: Team, slots: Profession[]): BoardItem[] => {
+    if (slots.length === 0) {
+        return getTeamPlayers(team).map(createPlayerItem);
+    }
+
+    return slots.map((profession, index) =>
+        createSlotItem(team.id, index, profession, team.players[index] ?? null)
+    );
+};
+
+const createBoardSnapshot = (lobby: Omit<Lobby, "adminToken">): BoardSnapshot => {
+    const assignedPlayerIds = new Set(lobby.teams.flatMap(team => getTeamPlayers(team).map(player => player.id)));
+    const snapshot: BoardSnapshot = {
+        [QUEUE_COLUMN_ID]: lobby.players
+            .filter(player => !assignedPlayerIds.has(player.id))
+            .map(createPlayerItem),
+    };
+
+    for (const team of lobby.teams) {
+        snapshot[teamColumnId(team.id)] = createTeamBoardItems(team, lobby.slots ?? []);
+    }
+
+    return snapshot;
+};
+
+const getDndOptions = (isAdmin: boolean) => ({
+    group: DND_GROUP,
+    disabled: !isAdmin,
+    draggable: (child: HTMLElement) => child.hasAttribute("data-dnd-item"),
+    dragHandle: "[data-player-drag-handle]",
+    plugins: [dropOrSwap<BoardItem>({ shouldSwap: () => true })],
+});
+
+const addUniquePlayer = (players: Player[], player: Player, seen: Set<string>) => {
+    if (seen.has(player.id)) return;
+    seen.add(player.id);
+    players.push(player);
+};
+
+const assignPlayerToSlot = (
+    assignments: Array<Player | null>,
+    slots: Profession[],
+    player: Player,
+    preferredIndex: number,
+    seenAssigned: Set<string>,
+    rejectedPlayers: Player[],
+) => {
+    if (seenAssigned.has(player.id)) return;
+
+    const targetIndexes = [
+        preferredIndex,
+        ...slots.map((_, index) => index),
+    ].filter((index, position, indexes) =>
+        index >= 0 && index < slots.length && indexes.indexOf(index) === position
+    );
+
+    for (const index of targetIndexes) {
+        if (!assignments[index] && player.professions.includes(slots[index])) {
+            assignments[index] = player;
+            seenAssigned.add(player.id);
+            return;
+        }
+    }
+
+    rejectedPlayers.push(player);
+};
+
+const normalizeBoardSnapshot = (
+    lobby: Omit<Lobby, "adminToken">,
+    snapshot: BoardSnapshot,
+): { teams: Team[]; players: Player[] } => {
+    const slots = lobby.slots ?? [];
+    const assignedIds = new Set<string>();
+    const rejectedPlayers: Player[] = [];
+
+    const teams = lobby.teams.map(team => {
+        const columnItems = snapshot[teamColumnId(team.id)] ?? createTeamBoardItems(team, slots);
+
+        if (slots.length === 0) {
+            const players: Player[] = [];
+            for (const item of columnItems) {
+                const player = getBoardItemPlayer(item);
+                if (player && !assignedIds.has(player.id)) {
+                    assignedIds.add(player.id);
+                    players.push(player);
+                }
+            }
+            return { ...team, players };
+        }
+
+        const assignments: Array<Player | null> = Array(slots.length).fill(null);
+        const preservesSlotIndexes = columnItems.length !== slots.length;
+
+        columnItems.forEach((item, index) => {
+            const player = getBoardItemPlayer(item);
+            if (!player) return;
+            const preferredIndex = preservesSlotIndexes && item.kind === "slot" && item.teamId === team.id
+                ? item.slotIndex
+                : index;
+            assignPlayerToSlot(assignments, slots, player, preferredIndex, assignedIds, rejectedPlayers);
+        });
+
+        return { ...team, players: assignments, slots };
+    });
+
+    const queuePlayers: Player[] = [];
+    const queuedIds = new Set<string>();
+
+    for (const player of rejectedPlayers) {
+        if (!assignedIds.has(player.id)) {
+            addUniquePlayer(queuePlayers, player, queuedIds);
+        }
+    }
+
+    for (const item of snapshot[QUEUE_COLUMN_ID] ?? []) {
+        const player = getBoardItemPlayer(item);
+        if (player && !assignedIds.has(player.id)) {
+            addUniquePlayer(queuePlayers, player, queuedIds);
+        }
+    }
+
+    for (const player of lobby.players) {
+        if (!assignedIds.has(player.id)) {
+            addUniquePlayer(queuePlayers, player, queuedIds);
+        }
+    }
+
+    return {
+        teams,
+        players: [
+            ...queuePlayers,
+            ...teams.flatMap(team => getTeamPlayers(team)),
+        ],
+    };
+};
 
 // ── Shared components ────────────────────────────────────────────────────────
 function ProfessionBadge({ profession }: { profession: Profession }) {
@@ -45,119 +227,120 @@ function ProfessionBadge({ profession }: { profession: Profession }) {
 
 function PlayerCard({
     player,
-    source,
     isOwn,
     isAdmin,
     onEdit,
 }: {
     player: Player;
-    source: DragSource;
     isOwn: boolean;
     isAdmin: boolean;
     onEdit: () => void;
 }) {
-    const { setDragging } = useContext(DragCtx);
     return (
         <div
-            draggable={isAdmin}
-            onDragStart={() => setDragging(source)}
-            onDragEnd={() => setDragging(null)}
+            data-dnd-item="true"
             className={`group flex flex-col gap-1.5 px-3 py-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] hover:border-white/[0.16] hover:bg-white/[0.06] transition-all select-none ${isAdmin ? "cursor-grab active:cursor-grabbing" : "cursor-default"}`}
         >
-            <div className="flex items-center gap-2">
-                {player.isAdmin && <Shield className="size-3 text-amber-400 shrink-0" />}
-                <span className="text-sm font-semibold text-stone-100 tracking-wide truncate flex-1">{player.name}</span>
-                {isOwn && (
-                    <button
-                        type="button"
-                        onMouseDown={e => e.stopPropagation()}
-                        onClick={e => { e.stopPropagation(); onEdit(); }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-stone-500 hover:text-stone-200 shrink-0 cursor-pointer"
-                    >
-                        <Pencil className="size-3" />
-                    </button>
-                )}
-            </div>
-            <div className="flex flex-wrap gap-1">
-                {player.professions.map(p => <ProfessionBadge key={p} profession={p} />)}
+            <div data-player-drag-handle={isAdmin ? "true" : undefined} className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                    {player.isAdmin && <Shield className="size-3 text-amber-400 shrink-0" />}
+                    <span className="text-sm font-semibold text-stone-100 tracking-wide truncate flex-1">{player.name}</span>
+                    {isOwn && (
+                        <button
+                            type="button"
+                            onMouseDown={e => e.stopPropagation()}
+                            onClick={e => { e.stopPropagation(); onEdit(); }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-stone-500 hover:text-stone-200 shrink-0 cursor-pointer"
+                        >
+                            <Pencil className="size-3" />
+                        </button>
+                    )}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                    {player.professions.map(p => <ProfessionBadge key={p} profession={p} />)}
+                </div>
             </div>
         </div>
     );
 }
 
+// ── Synced drag list ──────────────────────────────────────────────────────────
+// Keeps formkit's internal list in sync with the externally-controlled snapshot
+// without feeding stale items back up. The crux: emit to the parent ONLY when the
+// internal list diverges from the snapshot we last adopted from props. If `items`
+// still matches that snapshot, a difference from the *current* props means a fresh
+// inbound snapshot (e.g. a profession edit) — not a local drag — so we must stay
+// quiet, otherwise we echo stale items back and trigger an infinite commit loop.
+// The emit effect is declared before the adopt effect on purpose: it must read the
+// ref before the adopt effect advances it in the same commit.
+function useSyncedDragList(
+    initialItems: BoardItem[],
+    isAdmin: boolean,
+    onItemsChange: (items: BoardItem[]) => void,
+) {
+    const initialSignature = useMemo(() => boardItemSignature(initialItems), [initialItems]);
+    const dndOptions = useMemo(() => getDndOptions(isAdmin), [isAdmin]);
+    const [listRef, items, setItems] = useDragAndDrop<HTMLDivElement, BoardItem>(initialItems, dndOptions);
+    const itemSignature = useMemo(() => boardItemSignature(items), [items]);
+    const adoptedSignatureRef = useRef(initialSignature);
+
+    // state -> parent: only genuine local mutations
+    useEffect(() => {
+        if (itemSignature === initialSignature) return;
+        if (itemSignature === adoptedSignatureRef.current) return;
+        onItemsChange(items);
+    }, [itemSignature, initialSignature, items, onItemsChange]);
+
+    // parent -> state: adopt the incoming snapshot
+    useEffect(() => {
+        setItems(initialItems);
+        adoptedSignatureRef.current = initialSignature;
+    }, [initialItems, initialSignature, setItems]);
+
+    return { listRef, items };
+}
+
 // ── Queue column (formkit free-list) ─────────────────────────────────────────
 function QueueColumn({
-    players,
+    items: initialItems,
     isAdmin,
     myPlayerId,
-    isPersistingRef,
     onItemsChange,
     onEditPlayer,
-    onDropFromSlot,
 }: {
-    players: Player[];
+    items: BoardItem[];
     isAdmin: boolean;
     myPlayerId: string;
-    isPersistingRef: React.RefObject<boolean>;
-    onItemsChange: (items: Player[]) => void;
+    onItemsChange: (items: BoardItem[]) => void;
     onEditPlayer: (player: Player) => void;
-    onDropFromSlot: (src: DragSource & { kind: "slot" }) => void;
 }) {
-    const { dragging, setDragging } = useContext(DragCtx);
-    const [over, setOver] = useState(false);
-    const [listRef, items, setItems] = useDragAndDrop<HTMLDivElement, Player>(players, {
-        group: "match-players",
-        disabled: !isAdmin,
-    });
-
-    useEffect(() => {
-        if (!isPersistingRef.current) setItems(players);
-    }, [players]);
-
-    useEffect(() => {
-        onItemsChange(items);
-    }, [items]);
-
-    const handleDragOver = (e: React.DragEvent) => {
-        if (dragging?.kind === "slot") { e.preventDefault(); setOver(true); }
-    };
-    const handleDragLeave = () => setOver(false);
-    const handleDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-        setOver(false);
-        if (dragging?.kind === "slot") {
-            onDropFromSlot(dragging);
-            setDragging(null);
-        }
-    };
+    const { listRef, items } = useSyncedDragList(initialItems, isAdmin, onItemsChange);
 
     return (
-        <div
-            className={`flex flex-col w-56 shrink-0 rounded-xl border overflow-hidden transition-colors ${over ? "border-white/[0.25] bg-white/[0.06]" : "bg-white/[0.03] border-white/[0.08]"}`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-        >
+        <div className="flex flex-col w-56 shrink-0 rounded-xl border overflow-hidden transition-colors bg-white/[0.03] border-white/[0.08]">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.08] bg-white/[0.03]">
                 <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-stone-400">Player queue</span>
-                <span className="text-[11px] font-mono text-stone-600 bg-white/[0.05] border border-white/[0.08] px-1.5 py-0.5 rounded-md">{items.length}</span>
+                <span className="text-[11px] font-mono text-stone-600 bg-white/[0.05] border border-white/[0.08] px-1.5 py-0.5 rounded-md">{items.filter(item => getBoardItemPlayer(item)).length}</span>
             </div>
             <div ref={listRef} className="flex flex-col gap-2 p-2 overflow-y-auto flex-1 min-h-[60px]">
-                {items.length === 0 && (
+                {items.filter(item => getBoardItemPlayer(item)).length === 0 && (
                     <div className="flex items-center justify-center h-16 text-[11px] text-stone-700 uppercase tracking-widest pointer-events-none">
                         {isAdmin ? "Drop here" : "Empty"}
                     </div>
                 )}
-                {items.map(p => (
-                    <PlayerCard
-                        key={p.id}
-                        player={p}
-                        source={{ kind: "queue", player: p }}
-                        isOwn={p.id === myPlayerId}
-                        isAdmin={isAdmin}
-                        onEdit={() => onEditPlayer(p)}
-                    />
-                ))}
+                {items.map(item => {
+                    const player = getBoardItemPlayer(item);
+                    if (!player) return <div key={item.__key} data-dnd-item="true" className="hidden" />;
+                    return (
+                        <PlayerCard
+                            key={item.__key}
+                            player={player}
+                            isOwn={player.id === myPlayerId}
+                            isAdmin={isAdmin}
+                            onEdit={() => onEditPlayer(player)}
+                        />
+                    );
+                })}
             </div>
         </div>
     );
@@ -165,61 +348,28 @@ function QueueColumn({
 
 // ── Team slot column ──────────────────────────────────────────────────────────
 function SlotDropZone({
-    slotIndex,
     requiredProfession,
     occupant,
-    teamId,
     isAdmin,
     myPlayerId,
-    onDrop,
     onEditPlayer,
 }: {
-    slotIndex: number;
     requiredProfession: Profession;
     occupant: Player | null;
-    teamId: string;
     isAdmin: boolean;
     myPlayerId: string;
-    onDrop: (slotIndex: number, src: DragSource) => void;
     onEditPlayer: (player: Player) => void;
 }) {
-    const { dragging, setDragging } = useContext(DragCtx);
-    const [over, setOver] = useState(false);
     const s = PROFESSION_STYLES[requiredProfession];
-
-    const canAccept = dragging
-        ? dragging.player.professions.includes(requiredProfession)
-        : false;
-
-    const handleDragOver = (e: React.DragEvent) => {
-        if (!dragging || !isAdmin) return;
-        if (canAccept) { e.preventDefault(); setOver(true); }
-    };
-    const handleDragLeave = () => setOver(false);
-    const handleDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-        setOver(false);
-        if (dragging && canAccept) {
-            onDrop(slotIndex, dragging);
-            setDragging(null);
-        }
-    };
-
-    const borderClass = over
-        ? canAccept ? "border-emerald-500/70 bg-emerald-950/30" : "border-red-500/50 bg-red-950/20"
-        : dragging && !canAccept && dragging !== null
-            ? "border-dashed border-white/[0.1] bg-white/[0.01]"
-            : occupant
-                ? `${s.border} ${s.bg}`
-                : "border-dashed border-white/[0.15] bg-white/[0.02]";
+    const isCompatible = occupant ? occupant.professions.includes(requiredProfession) : true;
+    const borderClass = occupant
+        ? isCompatible
+            ? `${s.border} ${s.bg}`
+            : "border-red-500/50 bg-red-950/20"
+        : "border-dashed border-white/[0.15] bg-white/[0.02]";
 
     return (
-        <div
-            className={`flex flex-col gap-2 px-3 py-2.5 rounded-lg border transition-all ${borderClass}`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-        >
+        <div data-dnd-item="true" className={`flex flex-col gap-2 px-3 py-2.5 rounded-lg border transition-all ${borderClass}`}>
             <div className="flex items-center gap-2">
                 <span className={`text-[10px] font-bold uppercase tracking-widest ${occupant ? s.text : "text-stone-600"}`}>
                     {requiredProfession}
@@ -231,7 +381,6 @@ function SlotDropZone({
             {occupant && (
                 <PlayerCard
                     player={occupant}
-                    source={{ kind: "slot", player: occupant, teamId, slotIndex }}
                     isOwn={occupant.id === myPlayerId}
                     isAdmin={isAdmin}
                     onEdit={() => onEditPlayer(occupant)}
@@ -244,60 +393,66 @@ function SlotDropZone({
 function TeamColumn({
     team,
     slots,
+    items: initialItems,
     isAdmin,
     myPlayerId,
-    onSlotDrop,
+    onItemsChange,
     onEditPlayer,
 }: {
     team: Team;
     slots: Profession[];
+    items: BoardItem[];
     isAdmin: boolean;
     myPlayerId: string;
-    onSlotDrop: (teamId: string, slotIndex: number, src: DragSource) => void;
+    onItemsChange: (items: BoardItem[]) => void;
     onEditPlayer: (player: Player) => void;
 }) {
+    const { listRef, items } = useSyncedDragList(initialItems, isAdmin, onItemsChange);
+    const occupiedCount = items.filter(item => getBoardItemPlayer(item)).length;
+
     return (
         <div className="flex flex-col flex-1 min-w-[220px] rounded-xl bg-white/[0.03] border border-white/[0.08] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.08] bg-white/[0.03]">
                 <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-stone-400">{team.name}</span>
                 <span className="text-[11px] font-mono text-stone-600 bg-white/[0.05] border border-white/[0.08] px-1.5 py-0.5 rounded-md">
-                    {team.players.length}{slots.length > 0 ? `/${slots.length}` : ""}
+                    {occupiedCount}{slots.length > 0 ? `/${slots.length}` : ""}
                 </span>
             </div>
-            <div className="flex flex-col gap-2 p-2 overflow-y-auto flex-1">
+            <div ref={listRef} className="flex flex-col gap-2 p-2 overflow-y-auto flex-1 min-h-[84px]">
                 {slots.length === 0 ? (
-                    // No slots configured — free list using useDragAndDrop is not available here;
-                    // show players as draggable cards without slot enforcement
-                    team.players.length === 0 ? (
+                    occupiedCount === 0 ? (
                         <div className="flex items-center justify-center h-16 text-[11px] text-stone-700 uppercase tracking-widest">
-                            No slots configured
+                            {isAdmin ? "Drop here" : "No players assigned"}
                         </div>
                     ) : (
-                        team.players.map((p, i) => (
-                            <PlayerCard
-                                key={p.id}
-                                player={p}
-                                source={{ kind: "slot", player: p, teamId: team.id, slotIndex: i }}
-                                isOwn={p.id === myPlayerId}
-                                isAdmin={isAdmin}
-                                onEdit={() => onEditPlayer(p)}
-                            />
-                        ))
+                        items.map(item => {
+                            const player = getBoardItemPlayer(item);
+                            if (!player) return <div key={item.__key} data-dnd-item="true" className="hidden" />;
+                            return (
+                                <PlayerCard
+                                    key={item.__key}
+                                    player={player}
+                                    isOwn={player.id === myPlayerId}
+                                    isAdmin={isAdmin}
+                                    onEdit={() => onEditPlayer(player)}
+                                />
+                            );
+                        })
                     )
                 ) : (
-                    slots.map((prof, i) => (
-                        <SlotDropZone
-                            key={i}
-                            slotIndex={i}
-                            requiredProfession={prof}
-                            occupant={team.players[i] ?? null}
-                            teamId={team.id}
-                            isAdmin={isAdmin}
-                            myPlayerId={myPlayerId}
-                            onDrop={(si, src) => onSlotDrop(team.id, si, src)}
-                            onEditPlayer={onEditPlayer}
-                        />
-                    ))
+                    items.map((item, index) => {
+                        const profession = slots[index] ?? (item.kind === "slot" ? item.profession : slots[slots.length - 1]);
+                        return (
+                            <SlotDropZone
+                                key={item.__key}
+                                requiredProfession={profession}
+                                occupant={getBoardItemPlayer(item)}
+                                isAdmin={isAdmin}
+                                myPlayerId={myPlayerId}
+                                onEditPlayer={onEditPlayer}
+                            />
+                        );
+                    })
                 )}
             </div>
         </div>
@@ -323,11 +478,11 @@ export default function MatchPage() {
     const [configSlots, setConfigSlots] = useState<Profession[]>([]);
     const [configLoading, setConfigLoading] = useState(false);
 
-    // drag context state
-    const [dragging, setDragging] = useState<DragSource | null>(null);
-
     const isPersistingRef = useRef(false);
-    const queueSnapshotRef = useRef<Player[]>([]);
+    const lobbyRef = useRef<Omit<Lobby, "adminToken"> | null>(null);
+    const boardSnapshotRef = useRef<BoardSnapshot>({});
+    const boardCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const renderedBoardSnapshot = useMemo(() => lobby ? createBoardSnapshot(lobby) : null, [lobby]);
 
     const fetchLobby = useCallback(async () => {
         if (isPersistingRef.current) return;
@@ -340,7 +495,6 @@ export default function MatchPage() {
     const persistLobbyState = useCallback((newTeams: Team[], allLobbyPlayers: Player[]) => {
         const token = adminTokenRef.current;
         if (!token) return;
-        setLobby(prev => prev ? { ...prev, players: allLobbyPlayers, teams: newTeams } : prev);
         isPersistingRef.current = true;
         fetch(`/api/lobby/${matchId}/teams`, {
             method: "PATCH",
@@ -349,100 +503,32 @@ export default function MatchPage() {
         }).finally(() => { isPersistingRef.current = false; });
     }, [matchId]);
 
-    const handleQueueChange = useCallback((items: Player[]) => {
-        queueSnapshotRef.current = items;
-    }, []);
-
-    const handleSlotDrop = useCallback((teamId: string, slotIndex: number, src: DragSource) => {
-        setLobby(prev => {
-            if (!prev) return prev;
-            const incomingPlayer = src.player;
-            const targetTeam = prev.teams.find(t => t.id === teamId);
-            if (!targetTeam) return prev;
-            const currentOccupant = targetTeam.players[slotIndex] ?? null;
-
-            let newTeams = prev.teams.map(team => {
-                let players = [...team.players];
-
-                if (src.kind === "slot") {
-                    if (team.id === src.teamId) {
-                        // same team: clear source slot
-                        players[src.slotIndex] = undefined as unknown as Player;
-                    }
-                }
-
-                if (team.id === teamId) {
-                    // handle swap: put displaced occupant into source slot if same team
-                    if (currentOccupant && src.kind === "slot" && src.teamId === teamId) {
-                        players[src.slotIndex] = currentOccupant;
-                    }
-                    players[slotIndex] = incomingPlayer;
-                }
-
-                return { ...team, players: players.filter(Boolean) as Player[] };
-            });
-
-            // cross-team swap: put old occupant into source team source slot
-            if (currentOccupant && src.kind === "slot" && src.teamId !== teamId) {
-                const srcTeamSlots = prev.slots ?? [];
-                const srcRequiredProf = srcTeamSlots[src.slotIndex];
-                if (srcRequiredProf && currentOccupant.professions.includes(srcRequiredProf)) {
-                    newTeams = newTeams.map(team => {
-                        if (team.id !== src.teamId) return team;
-                        const players = [...team.players];
-                        players[src.slotIndex] = currentOccupant;
-                        return { ...team, players: players.filter(Boolean) as Player[] };
-                    });
-                }
-                // else occupant goes to queue (handled below)
-            }
-
-            // Build updated queue: remove incoming player, add displaced occupant if no swap
-            const allAssigned = new Set(newTeams.flatMap(t => t.players.map(p => p.id)));
-            const queueBase = queueSnapshotRef.current.length > 0
-                ? queueSnapshotRef.current
-                : prev.players.filter(p => !prev.teams.some(t => t.players.some(tp => tp.id === p.id)));
-
-            let newQueue = queueBase.filter(p => p.id !== incomingPlayer.id && !allAssigned.has(p.id));
-
-            // If occupant was displaced and not placed in swap slot, return to queue
-            if (currentOccupant && !allAssigned.has(currentOccupant.id)) {
-                newQueue = [currentOccupant, ...newQueue];
-            }
-
-            queueSnapshotRef.current = newQueue;
-            const allPlayers = [...newQueue, ...newTeams.flatMap(t => t.players)];
-            const seen = new Set<string>();
-            const dedupedPlayers = allPlayers.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
-
-            setTimeout(() => persistLobbyState(newTeams, dedupedPlayers), 0);
-            return { ...prev, players: dedupedPlayers, teams: newTeams };
-        });
+    const commitBoardSnapshot = useCallback(() => {
+        const prev = lobbyRef.current;
+        if (!prev) return;
+        const normalized = normalizeBoardSnapshot(prev, boardSnapshotRef.current);
+        // Persist OUTSIDE the state updater. A fetch inside setLobby's updater is an
+        // impure side effect that React's StrictMode double-invokes in dev, firing the
+        // PATCH twice per commit (the source of the duplicate /teams requests).
+        setLobby({ ...prev, players: normalized.players, teams: normalized.teams });
+        persistLobbyState(normalized.teams, normalized.players);
     }, [persistLobbyState]);
 
-    const handleDropToQueue = useCallback((src: DragSource & { kind: "slot" }) => {
-        setLobby(prev => {
-            if (!prev) return prev;
-            const newTeams = prev.teams.map(team => {
-                if (team.id !== src.teamId) return team;
-                const players = team.players.filter((_, i) => i !== src.slotIndex);
-                return { ...team, players };
-            });
-            const allAssigned = new Set(newTeams.flatMap(t => t.players.map(p => p.id)));
-            const queueBase = queueSnapshotRef.current.length > 0
-                ? queueSnapshotRef.current
-                : prev.players.filter(p => !prev.teams.some(t => t.players.some(tp => tp.id === p.id)));
-            const newQueue = allAssigned.has(src.player.id)
-                ? queueBase.filter(p => !allAssigned.has(p.id))
-                : [...queueBase.filter(p => p.id !== src.player.id && !allAssigned.has(p.id)), src.player];
-            queueSnapshotRef.current = newQueue;
-            const allPlayers = [...newQueue, ...newTeams.flatMap(t => t.players)];
-            const seen = new Set<string>();
-            const dedupedPlayers = allPlayers.filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
-            setTimeout(() => persistLobbyState(newTeams, dedupedPlayers), 0);
-            return { ...prev, players: dedupedPlayers, teams: newTeams };
-        });
-    }, [persistLobbyState]);
+    const scheduleBoardCommit = useCallback((columnId: string, items: BoardItem[]) => {
+        boardSnapshotRef.current = {
+            ...boardSnapshotRef.current,
+            [columnId]: items,
+        };
+
+        if (boardCommitTimerRef.current) {
+            clearTimeout(boardCommitTimerRef.current);
+        }
+
+        boardCommitTimerRef.current = setTimeout(() => {
+            boardCommitTimerRef.current = null;
+            commitBoardSnapshot();
+        }, 0);
+    }, [commitBoardSnapshot]);
 
     const openConfigModal = useCallback(() => {
         if (!lobby) return;
@@ -496,7 +582,7 @@ export default function MatchPage() {
                     players: prev.players.map(p => p.id === editingPlayer.id ? { ...p, professions: editProfessions } : p),
                     teams: prev.teams.map(t => ({
                         ...t,
-                        players: t.players.map(p => p.id === editingPlayer.id ? { ...p, professions: editProfessions } : p),
+                        players: t.players.map(p => p?.id === editingPlayer.id ? { ...p, professions: editProfessions } : p),
                     })),
                 };
             });
@@ -513,8 +599,22 @@ export default function MatchPage() {
         fetchLobby();
         const intervalId = setInterval(fetchLobby, 5000);
         intervalRef.current = intervalId;
-        return () => clearInterval(intervalId);
+        return () => {
+            clearInterval(intervalId);
+            if (boardCommitTimerRef.current) {
+                clearTimeout(boardCommitTimerRef.current);
+            }
+        };
     }, [matchId, fetchLobby]);
+
+    useEffect(() => {
+        lobbyRef.current = lobby;
+    }, [lobby]);
+
+    useEffect(() => {
+        if (!renderedBoardSnapshot || boardCommitTimerRef.current) return;
+        boardSnapshotRef.current = renderedBoardSnapshot;
+    }, [renderedBoardSnapshot]);
 
     const handleCopyCode = () => {
         navigator.clipboard.writeText(matchId);
@@ -539,10 +639,8 @@ export default function MatchPage() {
     }
 
     const status = STATUS_STYLES[lobby.status] ?? STATUS_STYLES.waiting;
-    const unassignedPlayers = lobby.players.filter(
-        p => !lobby.teams.some(t => t.players.some(tp => tp.id === p.id))
-    );
-    const matchSizeLabel = `${(lobby.slots?.length ?? 0)}s`;
+    const boardSnapshot = renderedBoardSnapshot ?? createBoardSnapshot(lobby);
+    const matchSizeLabel = `${(lobby.slots?.length ?? 0) * lobby.teams.length}s`;
 
     return (
         <div className="fixed inset-0 flex items-center justify-center p-6 z-10">
@@ -597,30 +695,27 @@ export default function MatchPage() {
                 </header>
 
                 {/* ── columns ── */}
-                <DragCtx.Provider value={{ dragging, setDragging }}>
                 <div className="flex flex-1 overflow-hidden gap-3 p-4">
                     <QueueColumn
-                        players={unassignedPlayers}
+                        items={boardSnapshot[QUEUE_COLUMN_ID] ?? []}
                         isAdmin={isAdmin}
                         myPlayerId={myPlayerId}
-                        isPersistingRef={isPersistingRef}
-                        onItemsChange={handleQueueChange}
+                        onItemsChange={items => scheduleBoardCommit(QUEUE_COLUMN_ID, items)}
                         onEditPlayer={openEditModal}
-                        onDropFromSlot={handleDropToQueue}
                     />
                     {lobby.teams.map((team) => (
                         <TeamColumn
                             key={team.id}
                             team={team}
                             slots={lobby.slots ?? []}
+                            items={boardSnapshot[teamColumnId(team.id)] ?? []}
                             isAdmin={isAdmin}
                             myPlayerId={myPlayerId}
-                            onSlotDrop={handleSlotDrop}
+                            onItemsChange={items => scheduleBoardCommit(teamColumnId(team.id), items)}
                             onEditPlayer={openEditModal}
                         />
                     ))}
                 </div>
-                </DragCtx.Provider>
 
                 {/* ── config modal ── */}
                 {configOpen && (

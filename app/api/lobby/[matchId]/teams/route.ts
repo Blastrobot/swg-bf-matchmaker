@@ -21,9 +21,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ma
         for (const team of teams) {
             for (let i = 0; i < team.players.length; i++) {
                 const requiredProfession = lobby.slots[i];
-                if (requiredProfession && !team.players[i].professions.includes(requiredProfession)) {
+                const player = team.players[i];
+                if (requiredProfession && player && !player.professions.includes(requiredProfession)) {
                     return NextResponse.json(
-                        { error: `Slot mismatch: player "${team.players[i].name}" does not have required profession "${requiredProfession}"` },
+                        { error: `Slot mismatch: player "${player.name}" does not have required profession "${requiredProfession}"` },
                         { status: 400 }
                     );
                 }

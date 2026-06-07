@@ -1,5 +1,5 @@
 import { getLobby, updateLobby } from "@/lib/store";
-import type { Profession, Team } from "@/lib/types";
+import type { Player, Profession, Team } from "@/lib/types";
 import { NextResponse } from "next/server";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ matchId: string }> }) {
@@ -27,6 +27,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ma
     const updatedTeams: Team[] = lobby.teams.map((team, index) => ({
         ...team,
         name: teamNames?.[index] ?? team.name,
+        players: newSlots.length > 0
+            ? newSlots.map((slot, slotIndex) => {
+                const player = team.players[slotIndex] ?? null;
+                return player?.professions.includes(slot) ? player : null;
+            })
+            : team.players.filter((player): player is Player => Boolean(player)),
         slots: newSlots,
     }));
 

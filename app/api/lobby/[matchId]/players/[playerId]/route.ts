@@ -30,7 +30,7 @@ export async function PATCH(
     const updatedTeams = lobby.teams.map(team => ({
         ...team,
         players: team.players.map(p =>
-            p.id === playerId ? { ...p, professions } : p
+            p?.id === playerId ? { ...p, professions } : p
         ),
     }));
 
