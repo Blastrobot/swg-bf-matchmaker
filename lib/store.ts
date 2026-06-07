@@ -1,4 +1,4 @@
-import { Lobby, MatchFormat, Player, Profession, Team } from "./types";
+import type { Lobby, Player, Profession, Team } from "./types";
 
 /*
  * In Next.js dev mode, hot-reloading re-evaluates server modules on every file
@@ -9,7 +9,7 @@ import { Lobby, MatchFormat, Player, Profession, Team } from "./types";
 declare global { var __lobbies: Map<string, Lobby> | undefined }
 const lobbies = (globalThis.__lobbies ??= new Map<string, Lobby>());
 
-export const createLobby = (format: MatchFormat, teamNames: string[], adminName: string, adminProfessions: Profession[]): { matchId: string, adminToken: string, adminPlayerId: string } => {
+export const createLobby = (teamNames: string[], adminName: string, adminProfessions: Profession[]): { matchId: string, adminToken: string, adminPlayerId: string } => {
     const matchId = crypto.randomUUID();
     const adminToken = crypto.randomUUID();
 
@@ -39,7 +39,6 @@ export const createLobby = (format: MatchFormat, teamNames: string[], adminName:
         players: [adminPlayer],
         teams: lobbyTeams,
         slots: [],
-        format,
         status: "waiting",
         createdAt: Date.now()
     };

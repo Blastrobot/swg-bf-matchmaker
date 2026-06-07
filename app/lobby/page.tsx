@@ -2,12 +2,10 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PROFESSIONS, type MatchFormat, type Profession } from "@/lib/types";
+import { PROFESSIONS, type Profession } from "@/lib/types";
 import { ArrowRight, Plus, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
-const FORMATS: MatchFormat[] = ["6s", "8s", "10s", "12s", "14s", "16s"];
 
 export default function Lobby() {
     const router = useRouter();
@@ -23,8 +21,7 @@ export default function Lobby() {
 
     // — create flow state
     const [createModalOpen, setCreateModalOpen] = useState(false);
-    const [teamNames, setTeamNames] = useState(["", ""]);
-    const [format, setFormat] = useState<MatchFormat>("8s");
+    const [teamNames, setTeamNames] = useState(["Red", "Blue"]);
     const [adminName, setAdminName] = useState("");
     const [adminProfessions, setAdminProfessions] = useState<Profession[]>([]);
     const [createLoading, setCreateLoading] = useState(false);
@@ -102,7 +99,6 @@ export default function Lobby() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                format,
                 teamNames: teamNames.map(n => n.trim()),
                 adminName: adminName.trim(),
                 adminProfessions,
@@ -199,27 +195,6 @@ export default function Lobby() {
                                         }`}
                                     >
                                         {p}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* format */}
-                        <div className="flex flex-col gap-2">
-                            <label className="text-xs font-semibold tracking-widest uppercase text-stone-400">Match format</label>
-                            <div className="flex flex-wrap gap-2">
-                                {FORMATS.map(f => (
-                                    <button
-                                        key={f}
-                                        type="button"
-                                        onClick={() => setFormat(f)}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider border transition-all ${
-                                            format === f
-                                                ? "bg-white/[0.2] border-white/[0.4] text-white"
-                                                : "bg-white/[0.05] border-white/[0.1] text-stone-400 hover:border-white/[0.2] hover:text-stone-200"
-                                        }`}
-                                    >
-                                        {f}
                                     </button>
                                 ))}
                             </div>

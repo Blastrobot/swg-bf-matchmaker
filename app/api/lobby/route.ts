@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
     const body = await request.json();
-    const { format, teamNames, adminName, adminProfessions } = body;
+    const { teamNames, adminName, adminProfessions } = body;
 
-    const { matchId, adminToken, adminPlayerId } = createLobby(format, teamNames, adminName, adminProfessions);
+    const { matchId, adminToken, adminPlayerId } = createLobby(teamNames, adminName, adminProfessions);
 
     return NextResponse.json({
         matchId,

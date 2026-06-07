@@ -7,8 +7,6 @@ import { Copy, Check, Shield, Pencil, X, Settings, Plus } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, createContext, useContext } from "react";
 
-const FORMATS = ["6s", "8s", "10s", "12s", "14s", "16s"] as const;
-
 const PROFESSION_STYLES: Record<Profession, { bg: string; text: string; border: string }> = {
     medic:    { bg: "bg-emerald-950/60",  text: "text-emerald-400",  border: "border-emerald-800/50" },
     officer:  { bg: "bg-blue-950/60",     text: "text-blue-400",     border: "border-blue-800/50" },
@@ -322,7 +320,6 @@ export default function MatchPage() {
 
     // config modal state
     const [configOpen, setConfigOpen] = useState(false);
-    const [configFormat, setConfigFormat] = useState<typeof FORMATS[number]>("8s");
     const [configSlots, setConfigSlots] = useState<Profession[]>([]);
     const [configLoading, setConfigLoading] = useState(false);
 
@@ -449,7 +446,6 @@ export default function MatchPage() {
 
     const openConfigModal = useCallback(() => {
         if (!lobby) return;
-        setConfigFormat(lobby.format as typeof FORMATS[number]);
         setConfigSlots([...(lobby.slots ?? [])]);
         setConfigOpen(true);
     }, [lobby]);
@@ -461,7 +457,7 @@ export default function MatchPage() {
         const res = await fetch(`/api/lobby/${matchId}/config`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json", "x-admin-token": token },
-            body: JSON.stringify({ format: configFormat, slots: configSlots }),
+            body: JSON.stringify({ slots: configSlots }),
         });
         setConfigLoading(false);
         if (res.ok) {
@@ -469,7 +465,7 @@ export default function MatchPage() {
             setLobby(updated);
             setConfigOpen(false);
         }
-    }, [matchId, lobby, configFormat, configSlots]);
+    }, [matchId, lobby, configSlots]);
 
     const addConfigSlot = (p: Profession) => setConfigSlots(prev => [...prev, p]);
     const removeConfigSlot = (index: number) => setConfigSlots(prev => prev.filter((_, i) => i !== index));
@@ -546,6 +542,7 @@ export default function MatchPage() {
     const unassignedPlayers = lobby.players.filter(
         p => !lobby.teams.some(t => t.players.some(tp => tp.id === p.id))
     );
+    const matchSizeLabel = `${(lobby.slots?.length ?? 0)}s`;
 
     return (
         <div className="fixed inset-0 flex items-center justify-center p-6 z-10">
@@ -560,7 +557,7 @@ export default function MatchPage() {
                         </span>
                         <span className="text-white/20">|</span>
                         <span className="text-xs font-mono font-bold tracking-widest text-stone-300 uppercase bg-white/[0.05] border border-white/[0.08] px-2 py-0.5 rounded-md">
-                            {lobby.format}
+                            {matchSizeLabel}
                         </span>
                     </div>
 
@@ -637,26 +634,6 @@ export default function MatchPage() {
                                 <button type="button" onClick={() => setConfigOpen(false)} className="text-stone-400 hover:text-stone-100 transition-colors">
                                     <X className="size-5" />
                                 </button>
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                                <label className="text-xs font-semibold tracking-widest uppercase text-stone-400">Match format</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {FORMATS.map(f => (
-                                        <button
-                                            key={f}
-                                            type="button"
-                                            onClick={() => setConfigFormat(f)}
-                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider border transition-all ${
-                                                configFormat === f
-                                                    ? "bg-white/[0.2] border-white/[0.4] text-white"
-                                                    : "bg-white/[0.05] border-white/[0.1] text-stone-400 hover:border-white/[0.2] hover:text-stone-200"
-                                            }`}
-                                        >
-                                            {f}
-                                        </button>
-                                    ))}
-                                </div>
                             </div>
 
                             <div className="flex flex-col gap-3">

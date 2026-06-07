@@ -1,5 +1,5 @@
 import { getLobby, updateLobby } from "@/lib/store";
-import { Profession, Team } from "@/lib/types";
+import type { Profession, Team } from "@/lib/types";
 import { NextResponse } from "next/server";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ matchId: string }> }) {
@@ -20,7 +20,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ma
     }
 
     const body = await request.json();
-    const { format, teamNames, slots } = body;
+    const { teamNames, slots } = body;
 
     const newSlots: Profession[] = Array.isArray(slots) ? slots : lobby.slots;
 
@@ -31,11 +31,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ma
     }));
 
     const updatedLobby = updateLobby(matchId, {
-        format: format ?? lobby.format,
         slots: newSlots,
         teams: updatedTeams,
     });
 
-    const { adminToken: _, ...publicLobby } = updatedLobby!;
+    if (!updatedLobby) {
+        return NextResponse.json({ error: "Failed to update lobby" }, { status: 500 });
+    }
+
+    const { adminToken: _, ...publicLobby } = updatedLobby;
     return NextResponse.json(publicLobby, { status: 200 });
 }
