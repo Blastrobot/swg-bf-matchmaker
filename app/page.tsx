@@ -41,7 +41,7 @@ export default function Home() {
             >
                 {/* sheen sweep */}
                 <span className="pointer-events-none absolute inset-y-0 -left-1/2 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-0 transition-opacity duration-500 group-hover:animate-sweep group-hover:opacity-100" />
-                <span className="label text-sm text-holo-100">Enter 👺</span>
+                <span className="label text-sm text-holo-100">Enter</span>
                 <ArrowUpRight className="size-4 text-holo-300 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
             </Link>
         </section>

@@ -25,7 +25,7 @@ export default function CommandBackground({ children }: { children: ReactNode })
             <div className="pointer-events-none absolute inset-0 -z-20 bg-[radial-gradient(120%_120%_at_50%_-10%,transparent_40%,rgba(5,5,8,0.85)_100%)]" />
 
             {/* targeting grid */}
-            <div className="tactical-grid pointer-events-none absolute inset-0 -z-20 opacity-60 [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_85%)]" />
+            {/* <div className="tactical-grid pointer-events-none absolute inset-0 -z-20 opacity-60 [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_85%)]" /> */}
 
             {/* corner holo bloom */}
             <div className="animate-flicker pointer-events-none absolute -right-40 -top-40 -z-20 h-[28rem] w-[28rem] rounded-full bg-[radial-gradient(circle,rgba(244,183,64,0.18),transparent_70%)]" />

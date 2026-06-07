@@ -61,3 +61,7 @@ export const updateLobby = (id: string, data: Partial<Lobby>): Lobby | undefined
     lobbies.set(id, updated);
     return updated;
 }
+
+export const deleteLobby = (id: string): boolean => {
+    return lobbies.delete(id);
+}

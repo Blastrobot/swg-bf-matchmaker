@@ -7,8 +7,8 @@ import { PROFESSIONS } from "@/lib/types";
 import { PROFESSION_STYLES, PROFESSION_LABEL } from "@/lib/professions";
 import { ProfessionBadge } from "./ProfessionBadge";
 import { TeamExportSheet, copyTeamsImage } from "./TeamExportSheet";
-import { Copy, Check, Shield, Pencil, X, Settings, Plus, GripVertical, Radio, Camera } from "lucide-react";
-import { useParams } from "next/navigation";
+import { Copy, Check, Shield, Pencil, X, Settings, GripVertical, Radio, Camera, UserMinus, LogOut, Trash2, AlertTriangle } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const STATUS_STYLES: Record<string, { label: string; color: string; dot: string }> = {
@@ -214,12 +214,19 @@ function PlayerCard({
     isOwn,
     isAdmin,
     onEdit,
+    onKick,
+    onLeave,
 }: {
     player: Player;
     isOwn: boolean;
     isAdmin: boolean;
     onEdit: () => void;
+    onKick: (player: Player) => void;
+    onLeave: () => void;
 }) {
+    const canKick = isAdmin && !isOwn && !player.isAdmin;
+    const canLeave = isOwn && !player.isAdmin;
+    const stopDrag = (e: React.MouseEvent) => e.stopPropagation();
     return (
         <div
             data-dnd-item="true"
@@ -232,16 +239,41 @@ function PlayerCard({
                     )}
                     {player.isAdmin && <Shield className="size-3 shrink-0 text-holo-400" />}
                     <span className="flex-1 truncate text-sm font-medium text-stone-100">{player.name}</span>
-                    {isOwn && (
-                        <button
-                            type="button"
-                            onMouseDown={e => e.stopPropagation()}
-                            onClick={e => { e.stopPropagation(); onEdit(); }}
-                            className="shrink-0 cursor-pointer rounded-md p-1 text-stone-500 transition-all hover:bg-white/10 hover:text-holo-200 sm:opacity-0 sm:group-hover:opacity-100"
-                        >
-                            <Pencil className="size-3" />
-                        </button>
-                    )}
+                    <div className="flex shrink-0 items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+                        {isOwn && (
+                            <button
+                                type="button"
+                                title="Edit professions"
+                                onMouseDown={stopDrag}
+                                onClick={e => { e.stopPropagation(); onEdit(); }}
+                                className="cursor-pointer rounded-md p-1 text-stone-500 transition-all hover:bg-white/10 hover:text-holo-200"
+                            >
+                                <Pencil className="size-3" />
+                            </button>
+                        )}
+                        {canKick && (
+                            <button
+                                type="button"
+                                title={`Remove ${player.name}`}
+                                onMouseDown={stopDrag}
+                                onClick={e => { e.stopPropagation(); onKick(player); }}
+                                className="cursor-pointer rounded-md p-1 text-stone-500 transition-all hover:bg-red-500/15 hover:text-red-300"
+                            >
+                                <UserMinus className="size-3" />
+                            </button>
+                        )}
+                        {canLeave && (
+                            <button
+                                type="button"
+                                title="Leave lobby"
+                                onMouseDown={stopDrag}
+                                onClick={e => { e.stopPropagation(); onLeave(); }}
+                                className="cursor-pointer rounded-md p-1 text-stone-500 transition-all hover:bg-red-500/15 hover:text-red-300"
+                            >
+                                <LogOut className="size-3" />
+                            </button>
+                        )}
+                    </div>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                     {player.professions.map(p => <ProfessionBadge key={p} profession={p} />)}
@@ -294,12 +326,16 @@ function QueueColumn({
     myPlayerId,
     onItemsChange,
     onEditPlayer,
+    onKickPlayer,
+    onLeaveLobby,
 }: {
     items: BoardItem[];
     isAdmin: boolean;
     myPlayerId: string;
     onItemsChange: (items: BoardItem[]) => void;
     onEditPlayer: (player: Player) => void;
+    onKickPlayer: (player: Player) => void;
+    onLeaveLobby: () => void;
 }) {
     const { listRef, items } = useSyncedDragList(initialItems, isAdmin, onItemsChange);
 
@@ -329,6 +365,8 @@ function QueueColumn({
                             isOwn={player.id === myPlayerId}
                             isAdmin={isAdmin}
                             onEdit={() => onEditPlayer(player)}
+                            onKick={onKickPlayer}
+                            onLeave={onLeaveLobby}
                         />
                     );
                 })}
@@ -344,12 +382,16 @@ function SlotDropZone({
     isAdmin,
     myPlayerId,
     onEditPlayer,
+    onKickPlayer,
+    onLeaveLobby,
 }: {
     requiredProfession: Profession;
     occupant: Player | null;
     isAdmin: boolean;
     myPlayerId: string;
     onEditPlayer: (player: Player) => void;
+    onKickPlayer: (player: Player) => void;
+    onLeaveLobby: () => void;
 }) {
     const s = PROFESSION_STYLES[requiredProfession];
     const isCompatible = occupant ? occupant.professions.includes(requiredProfession) : true;
@@ -376,6 +418,8 @@ function SlotDropZone({
                     isOwn={occupant.id === myPlayerId}
                     isAdmin={isAdmin}
                     onEdit={() => onEditPlayer(occupant)}
+                    onKick={onKickPlayer}
+                    onLeave={onLeaveLobby}
                 />
             ) : (
                 <div className="label flex h-9 items-center justify-center text-[9px] text-stone-700">
@@ -394,6 +438,8 @@ function TeamColumn({
     myPlayerId,
     onItemsChange,
     onEditPlayer,
+    onKickPlayer,
+    onLeaveLobby,
 }: {
     team: Team;
     slots: Profession[];
@@ -402,6 +448,8 @@ function TeamColumn({
     myPlayerId: string;
     onItemsChange: (items: BoardItem[]) => void;
     onEditPlayer: (player: Player) => void;
+    onKickPlayer: (player: Player) => void;
+    onLeaveLobby: () => void;
 }) {
     const { listRef, items } = useSyncedDragList(initialItems, isAdmin, onItemsChange);
     const occupiedCount = items.filter(item => getBoardItemPlayer(item)).length;
@@ -436,6 +484,8 @@ function TeamColumn({
                                     isOwn={player.id === myPlayerId}
                                     isAdmin={isAdmin}
                                     onEdit={() => onEditPlayer(player)}
+                                    onKick={onKickPlayer}
+                                    onLeave={onLeaveLobby}
                                 />
                             );
                         })
@@ -451,6 +501,8 @@ function TeamColumn({
                                 isAdmin={isAdmin}
                                 myPlayerId={myPlayerId}
                                 onEditPlayer={onEditPlayer}
+                                onKickPlayer={onKickPlayer}
+                                onLeaveLobby={onLeaveLobby}
                             />
                         );
                     })
@@ -460,8 +512,16 @@ function TeamColumn({
     );
 }
 
+type ConfirmRequest = {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    action: () => void | Promise<void>;
+};
+
 export default function MatchPage() {
     const { matchId } = useParams<{ matchId: string }>();
+    const router = useRouter();
     const [lobby, setLobby] = useState<Omit<Lobby, "adminToken"> | null>(null);
     const [error, setError] = useState("");
     const [copied, setCopied] = useState(false);
@@ -481,6 +541,10 @@ export default function MatchPage() {
     const [configOpen, setConfigOpen] = useState(false);
     const [configSlots, setConfigSlots] = useState<Profession[]>([]);
     const [configLoading, setConfigLoading] = useState(false);
+
+    // confirm dialog state (kick / leave / disband)
+    const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+    const [confirmLoading, setConfirmLoading] = useState(false);
 
     const isPersistingRef = useRef(false);
     const lobbyRef = useRef<Omit<Lobby, "adminToken"> | null>(null);
@@ -593,6 +657,76 @@ export default function MatchPage() {
             setEditingPlayer(null);
         }
     };
+
+    // ── membership actions: kick (admin), leave (self), disband (admin) ──
+    const performKick = useCallback(async (player: Player) => {
+        const token = adminTokenRef.current;
+        if (!token) return;
+        const res = await fetch(`/api/lobby/${matchId}/players/${player.id}`, {
+            method: "DELETE",
+            headers: { "x-admin-token": token },
+        });
+        if (res.ok) setLobby(await res.json());
+    }, [matchId]);
+
+    const performLeave = useCallback(async () => {
+        const pid = myPlayerId || localStorage.getItem(`swg_player_id_${matchId}`);
+        if (!pid) return;
+        const res = await fetch(`/api/lobby/${matchId}/players/${pid}`, {
+            method: "DELETE",
+            headers: { "x-player-id": pid },
+        });
+        if (res.ok) {
+            localStorage.removeItem(`swg_player_id_${matchId}`);
+            router.push("/lobby");
+        }
+    }, [matchId, myPlayerId, router]);
+
+    const performDisband = useCallback(async () => {
+        const token = adminTokenRef.current;
+        if (!token) return;
+        const res = await fetch(`/api/lobby/${matchId}`, {
+            method: "DELETE",
+            headers: { "x-admin-token": token },
+        });
+        if (res.ok) {
+            localStorage.removeItem(`swg_admin_token_${matchId}`);
+            localStorage.removeItem(`swg_player_id_${matchId}`);
+            router.push("/lobby");
+        }
+    }, [matchId, router]);
+
+    const requestKick = useCallback((player: Player) => setConfirm({
+        title: "Remove operative",
+        message: `Remove ${player.name} from the lobby? They can rejoin with the lobby code.`,
+        confirmLabel: "Remove",
+        action: () => performKick(player),
+    }), [performKick]);
+
+    const requestLeave = useCallback(() => setConfirm({
+        title: "Leave lobby",
+        message: "You'll be removed from this lobby. You can rejoin later with the lobby code.",
+        confirmLabel: "Leave",
+        action: performLeave,
+    }), [performLeave]);
+
+    const requestDisband = useCallback(() => setConfirm({
+        title: "Disband lobby",
+        message: "This permanently deletes the lobby for everyone. This action cannot be undone.",
+        confirmLabel: "Disband",
+        action: performDisband,
+    }), [performDisband]);
+
+    const runConfirm = useCallback(async () => {
+        if (!confirm) return;
+        setConfirmLoading(true);
+        try {
+            await confirm.action();
+        } finally {
+            setConfirmLoading(false);
+            setConfirm(null);
+        }
+    }, [confirm]);
 
     useEffect(() => {
         const token = localStorage.getItem(`swg_admin_token_${matchId}`);
@@ -712,10 +846,28 @@ export default function MatchPage() {
                                     {exportState === "downloaded" && <><Check className="size-3" /> Saved PNG</>}
                                     {exportState === "failed" && <><X className="size-3" /> Failed</>}
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={requestDisband}
+                                    title="Permanently delete this lobby"
+                                    className="label flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/[0.06] px-2 py-1 text-[10px] text-red-300/80 transition-all hover:border-red-500/60 hover:bg-red-500/[0.12] hover:text-red-200"
+                                >
+                                    <Trash2 className="size-3" /> <span className="hidden sm:inline">Disband</span>
+                                </button>
                                 <span className="label flex items-center gap-1.5 rounded-md border border-holo-400/40 bg-holo-400/[0.08] px-2 py-1 text-[10px] text-holo-300">
                                     <Shield className="size-3" /> Admin
                                 </span>
                             </>
+                        )}
+                        {!isAdmin && myPlayerId && (
+                            <button
+                                type="button"
+                                onClick={requestLeave}
+                                title="Leave this lobby"
+                                className="label flex items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/[0.06] px-2 py-1 text-[10px] text-red-300/80 transition-all hover:border-red-500/60 hover:bg-red-500/[0.12] hover:text-red-200"
+                            >
+                                <LogOut className="size-3" /> <span className="hidden sm:inline">Leave</span>
+                            </button>
                         )}
                         <span className={`label flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${status.color}`}>
                             <span className={`size-1.5 rounded-full ${status.dot} animate-holo-pulse`} />
@@ -725,13 +877,15 @@ export default function MatchPage() {
                 </header>
 
                 {/* ── columns ── */}
-                <div className="tactical-grid flex flex-1 gap-3 overflow-x-auto overflow-y-hidden p-4">
+                <div className="flex flex-1 gap-3 overflow-x-auto overflow-y-hidden p-4">
                     <QueueColumn
                         items={boardSnapshot[QUEUE_COLUMN_ID] ?? []}
                         isAdmin={isAdmin}
                         myPlayerId={myPlayerId}
                         onItemsChange={items => scheduleBoardCommit(QUEUE_COLUMN_ID, items)}
                         onEditPlayer={openEditModal}
+                        onKickPlayer={requestKick}
+                        onLeaveLobby={requestLeave}
                     />
                     {lobby.teams.map((team) => (
                         <TeamColumn
@@ -743,6 +897,8 @@ export default function MatchPage() {
                             myPlayerId={myPlayerId}
                             onItemsChange={items => scheduleBoardCommit(teamColumnId(team.id), items)}
                             onEditPlayer={openEditModal}
+                            onKickPlayer={requestKick}
+                            onLeaveLobby={requestLeave}
                         />
                     ))}
                 </div>
@@ -873,6 +1029,42 @@ export default function MatchPage() {
                             >
                                 {editLoading ? "Saving…" : <>Save dossier <Check className="size-4" /></>}
                             </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* ── confirm dialog (kick / leave / disband) ── */}
+                {confirm && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
+                        <div className="brackets flex w-full max-w-sm flex-col gap-6 rounded-2xl border border-red-500/20 bg-[var(--void-1)]/90 p-7 text-stone-100 shadow-2xl shadow-black/60 backdrop-blur-2xl animate-rise">
+                            <div className="flex items-start gap-3">
+                                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10 text-red-300">
+                                    <AlertTriangle className="size-4" />
+                                </span>
+                                <div className="flex flex-col gap-1.5">
+                                    <span className="font-display text-xl uppercase tracking-wide">{confirm.title}</span>
+                                    <p className="text-[12px] leading-relaxed text-stone-400">{confirm.message}</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setConfirm(null)}
+                                    disabled={confirmLoading}
+                                    className="label flex h-10 items-center justify-center rounded-xl border border-white/[0.1] bg-white/[0.03] px-4 text-[11px] text-stone-300 transition-all hover:border-white/20 hover:text-stone-100 disabled:opacity-40"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={runConfirm}
+                                    disabled={confirmLoading}
+                                    className="label flex h-10 items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-500/[0.12] px-4 text-[11px] text-red-200 transition-all hover:bg-red-500/[0.2] disabled:opacity-40"
+                                >
+                                    {confirmLoading ? "Working…" : confirm.confirmLabel}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}
