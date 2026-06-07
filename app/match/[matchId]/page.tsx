@@ -5,7 +5,9 @@ import { useDragAndDrop } from "@formkit/drag-and-drop/react";
 import type { Lobby, Player, Profession, Team } from "@/lib/types";
 import { PROFESSIONS } from "@/lib/types";
 import { PROFESSION_STYLES, PROFESSION_LABEL } from "@/lib/professions";
-import { Copy, Check, Shield, Pencil, X, Settings, Plus, GripVertical, Radio } from "lucide-react";
+import { ProfessionBadge } from "./ProfessionBadge";
+import { TeamExportSheet, copyTeamsImage } from "./TeamExportSheet";
+import { Copy, Check, Shield, Pencil, X, Settings, Plus, GripVertical, Radio, Camera } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -207,16 +209,6 @@ const normalizeBoardSnapshot = (
 };
 
 // ── Shared components ────────────────────────────────────────────────────────
-function ProfessionBadge({ profession }: { profession: Profession }) {
-    const s = PROFESSION_STYLES[profession];
-    return (
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-[3px] text-[11px] font-medium capitalize tracking-tight ${s.chip} ${s.text}`}>
-            <span className={`size-1.5 rounded-full ${s.dot}`} />
-            {PROFESSION_LABEL[profession]}
-        </span>
-    );
-}
-
 function PlayerCard({
     player,
     isOwn,
@@ -477,6 +469,9 @@ export default function MatchPage() {
     const [myPlayerId, setMyPlayerId] = useState("");
     const adminTokenRef = useRef<string | null>(null);
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // teams-image export
+    const exportRef = useRef<HTMLDivElement>(null);
+    const [exportState, setExportState] = useState<"idle" | "copied" | "downloaded" | "failed">("idle");
     // edit modal state
     const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
     const [editProfessions, setEditProfessions] = useState<Profession[]>([]);
@@ -631,6 +626,13 @@ export default function MatchPage() {
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const handleExportTeams = async () => {
+        if (!exportRef.current) return;
+        const result = await copyTeamsImage(exportRef.current, `teams-${matchId}.png`);
+        setExportState(result);
+        setTimeout(() => setExportState("idle"), 2200);
+    };
+
     if (error) {
         return (
             <div className="brackets flex flex-col items-center justify-center gap-3 rounded-2xl border border-red-800/40 bg-black/50 px-10 py-8 backdrop-blur-xl">
@@ -651,6 +653,8 @@ export default function MatchPage() {
     const status = STATUS_STYLES[lobby.status] ?? STATUS_STYLES.waiting;
     const boardSnapshot = renderedBoardSnapshot ?? createBoardSnapshot(lobby);
     const matchSizeLabel = `${(lobby.slots?.length ?? 0)}s`;
+    const slots = lobby.slots ?? [];
+    const allTeamsReady = slots.length > 0 && lobby.teams.every(t => t.players.filter(Boolean).length >= slots.length);
 
     return (
         <div className="fixed inset-0 z-10 flex items-center justify-center p-4 sm:p-6 pb-20">
@@ -689,6 +693,24 @@ export default function MatchPage() {
                                     className="label flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[10px] text-stone-400 transition-all hover:border-holo-400/40 hover:text-holo-200"
                                 >
                                     <Settings className="size-3" /> <span className="hidden sm:inline">Configure</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleExportTeams}
+                                    disabled={!allTeamsReady}
+                                    title={allTeamsReady ? "Copy both teams as an image" : "Fill every slot on both teams to copy"}
+                                    className={`label flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
+                                        exportState === "failed"
+                                            ? "border-red-500/50 bg-red-500/10 text-red-300"
+                                            : exportState !== "idle"
+                                                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
+                                                : "border-white/[0.08] bg-white/[0.03] text-stone-400 hover:border-holo-400/40 hover:text-holo-200"
+                                    }`}
+                                >
+                                    {exportState === "idle" && <><Camera className="size-3" /> <span className="hidden sm:inline">Copy teams</span></>}
+                                    {exportState === "copied" && <><Check className="size-3" /> Copied!</>}
+                                    {exportState === "downloaded" && <><Check className="size-3" /> Saved PNG</>}
+                                    {exportState === "failed" && <><X className="size-3" /> Failed</>}
                                 </button>
                                 <span className="label flex items-center gap-1.5 rounded-md border border-holo-400/40 bg-holo-400/[0.08] px-2 py-1 text-[10px] text-holo-300">
                                     <Shield className="size-3" /> Admin
@@ -866,6 +888,11 @@ export default function MatchPage() {
                     </span>
                 </div>
             </div>
+
+            {/* off-screen snapshot source for the Copy-teams button */}
+            {isAdmin && allTeamsReady && (
+                <TeamExportSheet ref={exportRef} teams={lobby.teams} slots={slots} />
+            )}
         </div>
     );
 }
